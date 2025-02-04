@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Video & Audio Stream</title>
+</head>
+
+<body>
+
+    <h1>Live Video & Audio Streaming</h1>
+
+    <!-- Video Stream -->
+    <img src="{{ url_for('video_feed') }}" width="640" height="480">
+
+    <!-- Audio Stream -->
+    <audio controls autoplay>
+        <source src="{{ url_for('audio_feed') }}" type="audio/wav">
+        Your browser does not support the audio element.
+    </audio>
+
+</body>
+
+</html>

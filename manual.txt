@@ -1,0 +1,8 @@
+python -m venv myenv
+myenv\Scripts\activate
+
+
+pip install flask opencv-python pyttsx3 pytesseract psutil torch dlib numpy scipy
+
+pip install dlib   #if required
+
