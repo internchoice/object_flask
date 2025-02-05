@@ -12,3 +12,4 @@ face_recognition
 scipy
 cmake
 dlib
+gunicorn
