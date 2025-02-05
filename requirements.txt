@@ -1,0 +1,14 @@
+Flask
+opencv-python
+torch
+numpy
+pyttsx3
+pytesseract
+psutil
+gtts
+pygame
+requests
+face_recognition
+scipy
+cmake
+dlib
