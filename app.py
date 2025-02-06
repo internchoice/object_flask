@@ -51,7 +51,7 @@ pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tessera
 def load_known_faces():
     """ Load known faces from the known_faces directory and prepare for recognition """
     global known_faces, known_face_names, known_face_encodings
-    known_faces_dir = 'known_faces'  # Directory containing images like ajit.jpg, dhanu.jpg
+    known_faces_dir = 'known_faces'  
     for filename in os.listdir(known_faces_dir):
         if filename.endswith(".jpg"):
             img_path = os.path.join(known_faces_dir, filename)
