@@ -6,5 +6,5 @@ pip install flask opencv-python pyttsx3 pytesseract psutil torch dlib numpy scip
 
 pip install dlib   #if required
 
-
+https://slproweb.com/products/Win32OpenSSL.html  #to download openssl
 openssl req -new -newkey rsa:2048 -days 365 -nodes -x509 -keyout key.pem -out cert.pem

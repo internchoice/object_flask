@@ -62,201 +62,163 @@
  -->
 
  <!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>YOLO Detection Camera Stream</title>
-  <style>
-    video, img {
-      width: 100%;
-      max-width: 600px;
-      border: 2px solid black;
-      display: block;
-      margin: 20px auto;
-    }
-    #environment-status, #detected-text {
-      text-align: center;
-      font-size: 1.5em;
-      color: #333;
-    }
-  </style>
-</head>
-<body>
-  <h2 style="text-align:center;">Camera Streams with YOLO Object Detection</h2>
-
-  <h3 style="text-align:center;">Your Camera Stream</h3>
-  <video id="video" autoplay playsinline></video>
-
-  <h3 style="text-align:center;">Processed Stream with YOLO Detections</h3>
-  <img id="processed-stream" src="/processed_feed" alt="Processed Stream"/>
-
-  <h3 id="battery-status" style="text-align:center;"></h3>
-
-  <!-- Add environment display -->
-  <h3 id="environment-status" style="text-align:center;"></h3>
-
-  <!-- Add detected text display -->
-  <h3 id="detected-text" style="text-align:center;"></h3>
-
-  <script>
-    let environmentSpoken = false;  // Flag to track environment speech state
-
-    async function startCamera() {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-        document.getElementById('video').srcObject = stream;
-      } catch (error) {
-        alert("Camera access denied or not available.");
-        console.error("Error accessing the camera:", error);
-      }
-    }
-
-    async function getBatteryStatus() {
-      try {
-        const battery = await navigator.getBattery();
-        const batteryStatus = document.getElementById("battery-status");
-
-        // Display initial battery status
-        updateBatteryStatus(battery.level);
-
-        // Monitor battery level changes
-        battery.addEventListener('levelchange', function() {
-          updateBatteryStatus(battery.level);
-        });
-
-      } catch (error) {
-        console.error("Error fetching battery status:", error);
-      }
-    }
-
-    function updateBatteryStatus(level) {
-      const batteryStatus = document.getElementById("battery-status");
-      batteryStatus.innerHTML = `Battery: ${Math.round(level * 100)}%`;
-
-      // Send updated battery level to the server
-      sendBatteryLevel(level * 100);
-
-      // Speak the battery percentage when it changes
-      speakFeedback(`Battery level is now ${Math.round(level * 100)} percent`);
-    }
-
-    function sendBatteryLevel(batteryLevel) {
-      fetch('/update_battery', {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ battery_level: batteryLevel })
-      }).then(response => response.json())
-        .then(data => {
-          console.log("Battery status sent to server:", data);
-        }).catch(error => {
-          console.error("Error sending battery level:", error);
-        });
-    }
-
-    function sendFrame() {
-      const video = document.getElementById('video');
-      if (video.videoWidth && video.videoHeight) {
-        const canvas = document.createElement('canvas');
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
-        const dataUrl = canvas.toDataURL('image/jpeg');
-
-        // Send frame to the server for YOLO processing
-        fetch('/update_frame', {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ frame: dataUrl })
-        }).then(response => response.json())
-          .then(data => {
-            if (data.detections && data.detections.length > 0) {
-              console.log("Detected objects:", data.detections);
-              processDetectedObjects(data.detections, data.faces, data.texts);  // Now also pass the detected texts
-              processEnvironment(data.environment);  // Process the environment detection
-            }
-          }).catch(error => {
-            console.error("Error sending frame:", error);
-          });
-      }
-      setTimeout(sendFrame, 100); // Update rate every 100ms
-    }
-
-    // Function to process the detected objects and faces, and detect text or signs
-    function processDetectedObjects(detections, faces, texts) {
-      const obstacleObjects = ["car", "tv", "truck", "bus", "aeroplane"]; // Add more obstacle objects as needed
-      const regularObjects = [];
-      
-      let obstacleDetected = false;
-      const obstacles = [];
-      const objects = [];
-
-      detections.forEach(item => {
-        if (obstacleObjects.includes(item)) {
-          obstacles.push(item);  // Collect obstacles
-          obstacleDetected = true;  // Flag that at least one obstacle is detected
-        } else {
-          objects.push(item);  // Collect other objects
-        }
-      });
-
-      // Speak the obstacle detections
-      if (obstacleDetected) {
-        speakFeedback("Obstacle in front: " + obstacles.join(", "));
-      }
-
-      // Speak the regular object detections
-      if (objects.length > 0) {
-        speakFeedback("" + objects.join(", "));
-      }
-
-      // Handle face detections
-      if (faces && faces.length > 0) {
-        faces.forEach(face => {
-          speakFeedback("This is: " + face);  // Speak detected face names (you can modify the response as needed)
-        });
-      }
-
-      // Handle detected text (signboard reading)
-      if (texts && texts.length > 0) {
-        const detectedText = texts.join(", ");
-        document.getElementById('detected-text').innerHTML = `Detected Text: ${detectedText}`;
-        speakFeedback(`Detected text: ${detectedText}`);  // Read out the detected text
-      }
-    }
-
-    // Function to update the environment display
-    function processEnvironment(environment) {
-      const environmentStatus = document.getElementById("environment-status");
-
-      // Check if the environment has changed and hasn't been spoken
-      if (environment !== environmentStatus.innerText && !environmentSpoken) {
-        environmentStatus.innerHTML = `Current Environment: ${environment}`;
-
-        // Speak the environment
-        speakFeedback(`Current environment is ${environment}`);
-        environmentSpoken = true;  // Set the flag to true after speaking the environment
-      }
-    }
-
-    // Text-to-speech function using the Web Speech API
-    function speakFeedback(text) {
-      const speechSynthesis = window.speechSynthesis;
-      const utterance = new SpeechSynthesisUtterance(text);
-      speechSynthesis.speak(utterance);
-    }
-
-    // Reset the flag if environment changes (Optional, based on your needs)
-    function resetEnvironmentSpoken() {
-      environmentSpoken = false;
-    }
-
-    document.addEventListener("DOMContentLoaded", () => {
-      startCamera().then(() => {
-        setTimeout(sendFrame, 100);
-        getBatteryStatus();  // Fetch battery status when page loads
-      });
-    });
-  </script>
-</body>
-</html>
+ <html lang="en">
+ <head>
+   <meta charset="UTF-8">
+   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+   <title>YOLO Detection Camera Stream</title>
+   <style>
+     video, img {
+       width: 100%;
+       max-width: 600px;
+       border: 2px solid black;
+       display: block;
+       margin: 20px auto;
+     }
+     #environment-status, #detected-text {
+       text-align: center;
+       font-size: 1.5em;
+       color: #333;
+     }
+   </style>
+ </head>
+ <body>
+   <h2 style="text-align:center;">Camera Streams with YOLO Object Detection</h2>
+   <h3 style="text-align:center;">Your Camera Stream</h3>
+   <video id="video" autoplay playsinline></video>
+   <h3 style="text-align:center;">Processed Stream with YOLO Detections</h3>
+   <img id="processed-stream" src="/processed_feed" alt="Processed Stream"/>
+   <h3 id="battery-status" style="text-align:center;"></h3>
+   <h3 id="environment-status" style="text-align:center;"></h3>
+   <h3 id="detected-text" style="text-align:center;"></h3>
+ 
+   <script>
+     let environmentSpoken = false;
+     let speechQueue = [];
+     let isSpeaking = false;
+ 
+     async function startCamera() {
+       try {
+         const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+         document.getElementById('video').srcObject = stream;
+       } catch (error) {
+         alert("Camera access denied or not available.");
+         console.error("Error accessing the camera:", error);
+       }
+     }
+ 
+     async function getBatteryStatus() {
+       try {
+         const battery = await navigator.getBattery();
+         updateBatteryStatus(battery.level);
+         battery.addEventListener('levelchange', function() {
+           updateBatteryStatus(battery.level);
+         });
+       } catch (error) {
+         console.error("Error fetching battery status:", error);
+       }
+     }
+ 
+     function updateBatteryStatus(level) {
+       const batteryStatus = document.getElementById("battery-status");
+       const percentage = Math.round(level * 100);
+       batteryStatus.innerHTML = `Battery: ${percentage}%`;
+       sendBatteryLevel(percentage);
+       speakFeedback(`Battery level is now ${percentage} percent`);
+     }
+ 
+     function sendBatteryLevel(batteryLevel) {
+       fetch('/update_battery', {
+         method: "POST",
+         headers: { "Content-Type": "application/json" },
+         body: JSON.stringify({ battery_level: batteryLevel })
+       }).catch(error => console.error("Error sending battery level:", error));
+     }
+ 
+     function sendFrame() {
+       const video = document.getElementById('video');
+       if (video.videoWidth && video.videoHeight) {
+         const canvas = document.createElement('canvas');
+         canvas.width = video.videoWidth;
+         canvas.height = video.videoHeight;
+         canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+         const dataUrl = canvas.toDataURL('image/jpeg');
+ 
+         fetch('/update_frame', {
+           method: "POST",
+           headers: { "Content-Type": "application/json" },
+           body: JSON.stringify({ frame: dataUrl })
+         }).then(response => response.json())
+           .then(data => {
+             if (data.detections) processDetectedObjects(data.detections, data.faces, data.texts);
+             processEnvironment(data.environment);
+           }).catch(error => console.error("Error sending frame:", error));
+       }
+       setTimeout(sendFrame, 100);
+     }
+ 
+     function processDetectedObjects(detections, faces, texts) {
+       const obstacleObjects = ["car", "tv", "truck", "bus", "aeroplane"];
+       let obstacles = [], objects = [];
+       
+       detections.forEach(item => {
+         if (obstacleObjects.includes(item)) {
+           obstacles.push(item);
+         } else {
+           objects.push(item);
+         }
+       });
+ 
+       if (obstacles.length > 0) {
+         speakFeedback("Obstacle in front: " + obstacles.join(", "));
+       }
+       if (objects.length > 0) {
+         speakFeedback(objects.join(", "));
+       }
+       if (faces && faces.length > 0) {
+         faces.forEach(face => speakFeedback("This is: " + face));
+       }
+       if (texts && texts.length > 0) {
+         document.getElementById('detected-text').innerHTML = `Detected Text: ${texts.join(", ")}`;
+         speakFeedback("Detected text: " + texts.join(", "));
+       }
+     }
+ 
+     function processEnvironment(environment) {
+       const environmentStatus = document.getElementById("environment-status");
+       if (environment !== environmentStatus.innerText && !environmentSpoken) {
+         environmentStatus.innerHTML = `Current Environment: ${environment}`;
+         speakFeedback(`Current environment is ${environment}`);
+         environmentSpoken = true;
+       }
+     }
+ 
+     function speakFeedback(text) {
+       if (!text || typeof text !== "string") return;
+       speechQueue.push(text);
+       processSpeechQueue();
+     }
+ 
+     function processSpeechQueue() {
+       if (isSpeaking || speechQueue.length === 0) return;
+       isSpeaking = true;
+       let text = speechQueue.shift();
+       const utterance = new SpeechSynthesisUtterance(text);
+       utterance.rate = 1;
+       utterance.onend = function () {
+         isSpeaking = false;
+         processSpeechQueue();
+       };
+       window.speechSynthesis.speak(utterance);
+     }
+ 
+     document.addEventListener("DOMContentLoaded", () => {
+       startCamera().then(() => {
+         setTimeout(sendFrame, 100);
+         getBatteryStatus();
+       });
+     });
+   </script>
+ </body>
+ </html>
+ 

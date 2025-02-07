@@ -8,10 +8,11 @@ import time
 import torch
 import pyttsx3
 import queue
-import pytesseract  # Import pytesseract
 import face_recognition
+import easyocr
 
 app = Flask(__name__)
+reader = easyocr.Reader(['en'])  # Supports multiple languages if needed
 
 cert_path = os.path.abspath("cert.pem")
 key_path = os.path.abspath("key.pem")
@@ -45,9 +46,6 @@ ENVIRONMENTS = {
 
 current_environment = "unknown"
 
-# Set the Tesseract executable path
-pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-
 def load_known_faces():
     """ Load known faces from the known_faces directory and prepare for recognition """
     global known_faces, known_face_names, known_face_encodings
@@ -56,17 +54,16 @@ def load_known_faces():
         if filename.endswith(".jpg"):
             img_path = os.path.join(known_faces_dir, filename)
             img = cv2.imread(img_path)
-            rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)  # Convert to RGB for face_recognition
+            rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-            # Find face locations and encodings
             face_locations = face_recognition.face_locations(rgb_img)
             face_encodings = face_recognition.face_encodings(rgb_img, face_locations)
 
             for encoding in face_encodings:
                 known_face_encodings.append(encoding)
-                known_face_names.append(filename.split(".")[0])  # Using filename as the name
+                known_face_names.append(filename.split(".")[0])
 
-# Call this function to load the known faces on server startup
+# Call this function to load known faces on server startup
 load_known_faces()
 
 # Track if environment has been spoken
@@ -77,7 +74,7 @@ def detect_environment(labels):
     global current_environment, environment_spoken
     environment_counts = {env: 0 for env in ENVIRONMENTS}
 
-    print(f"Detected labels: {labels}")  # Debug log to check detected labels
+    print(f"Detected labels: {labels}")
 
     for label in labels:
         for env, objects in ENVIRONMENTS.items():
@@ -88,46 +85,45 @@ def detect_environment(labels):
 
     if environment_counts[detected_environment] > 0 and detected_environment != current_environment:
         current_environment = detected_environment
-        if not environment_spoken:  # Only speak if the environment has not been spoken yet
+        if not environment_spoken:
             speak_feedback(f"Environment detected: {current_environment}")
             environment_spoken = True
             print(f"Environment detected: {current_environment}")
         else:
             print(f"Environment remains: {current_environment}")
     elif detected_environment != current_environment:
-        environment_spoken = False  # Reset if environment changes again
+        environment_spoken = False
 
 def detect_objects(frame):
-    """ Detects objects using YOLOv5 and face recognition """
+    """ Detects objects, text, and faces in a given frame """
+    global current_environment
+
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     results = model(rgb_frame)
     
     labels = results.names
     detections = []
     face_names = []
-
-    # Detect objects using YOLOv5
+    
+    # Object Detection
     for *box, conf, cls in results.xywh[0]:
         x1, y1, x2, y2 = map(int, box)
         class_name = labels[int(cls)]
         
-        # Draw bounding box for objects
         cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
         cv2.putText(frame, class_name, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 0, 0), 2)
         
         detections.append(class_name)
 
-    # Detect environment based on detected labels
     detect_environment(detections)
 
-    # Face detection and recognition
+    # Face Recognition
     faces = face_recognition.face_locations(rgb_frame)
     face_encodings = face_recognition.face_encodings(rgb_frame, faces)
     
     for (top, right, bottom, left), face_encoding in zip(faces, face_encodings):
         recognized = False
 
-        # Compare the face with known encodings
         for idx, known_encoding in enumerate(known_face_encodings):
             match = face_recognition.compare_faces([known_encoding], face_encoding, tolerance=0.6)
             if match[0]:
@@ -140,19 +136,24 @@ def detect_objects(frame):
         if not recognized:
             cv2.putText(frame, "Unknown", (left, top-10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
 
-    # Perform OCR to detect any text in the frame
-    ocr_result = pytesseract.image_to_string(frame)
-    process_text_signs(ocr_result)
+    # Text and Signboard Detection (OCR)
+    ocr_results = reader.readtext(frame)
+    detected_texts = []
 
-    return frame, detections, face_names
+    for (bbox, text, prob) in ocr_results:
+        if prob > 0.5:  # Filter out low-confidence detections
+            (x1, y1), (x2, y2) = bbox[0], bbox[2]
+            cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
+            cv2.putText(frame, text, (int(x1), int(y1)-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+            detected_texts.append(text)
 
-def process_text_signs(ocr_text):
-    """Process the OCR detected text and announce signs like 'EXIT' and 'STOP'."""
-    ocr_text = ocr_text.upper()  # Convert text to uppercase for easy comparison
-    if 'EXIT' in ocr_text:
-        speak_feedback("Exit sign detected")
-    elif 'STOP' in ocr_text:
-        speak_feedback("Stop sign detected")
+    # Provide audio feedback for detected signs/text
+    if detected_texts:
+        text_feedback = "Detected sign: " + ", ".join(detected_texts)
+        speak_feedback(text_feedback)
+        print(text_feedback)
+
+    return frame, detections, face_names, detected_texts
 
 def speak_feedback(text):
     """ Add speech request to the queue. """
@@ -167,7 +168,6 @@ def process_speech():
         engine.say(text)
         engine.runAndWait()
 
-# Start a background thread to process the speech queue
 speech_thread = threading.Thread(target=process_speech, daemon=True)
 speech_thread.start()
 
@@ -182,24 +182,21 @@ def update_frame():
     data = request.json.get("frame")
     detections = []
     face_names = []
-    environment = "unknown"  # Default environment
+    detected_texts = []
+    environment = "unknown"
 
     if data:
         header, encoded = data.split(',', 1)
         nparr = np.frombuffer(base64.b64decode(encoded), np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-        # Store the received frame
         with frame_lock:
             global_frame = img
 
-        # Detect objects and faces in the frame
-        _, detections, face_names = detect_objects(global_frame)
+        _, detections, face_names, detected_texts = detect_objects(global_frame)
+        environment = current_environment
 
-        # Detect the environment based on objects
-        environment = current_environment  # Assuming you already have current_environment variable in your backend
-
-    return jsonify({'detections': detections, 'faces': face_names, 'environment': environment}), 200
+    return jsonify({'detections': detections, 'faces': face_names, 'environment': environment, 'text': detected_texts}), 200
 
 @app.route('/processed_feed')
 def processed_feed():
@@ -210,9 +207,9 @@ def processed_feed():
                 if global_frame is None:
                     continue
                 
-                frame_with_objects, _, _ = detect_objects(global_frame)
+                frame_with_objects, detected_objects, detected_faces, detected_texts = detect_objects(global_frame)
 
-                # Encode the frame with object and face detection as JPEG
+
                 ret, jpeg = cv2.imencode('.jpg', frame_with_objects)
                 if not ret:
                     continue
@@ -220,7 +217,7 @@ def processed_feed():
                 frame = jpeg.tobytes()
                 yield (b'--frame\r\n'
                        b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-            time.sleep(0.03)  # Reduce lag by optimizing streaming timing
+            time.sleep(0.03)
     return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 if __name__ == '__main__':
