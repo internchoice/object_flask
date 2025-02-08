@@ -4,5 +4,4 @@ pyttsx3
 torch
 easyocr
 face-recognition
-numpy
-queue
+numpy==1.24.2
